@@ -1,0 +1,86 @@
+# =====================================================================
+# YouTube & YouTube Music 去广告增强 · Loon 专用插件
+# =====================================================================
+#
+# 1. 彻底去除 YouTube 视频贴片广告、首页信息流广告、搜索广告、Shorts 广告
+# 2. 彻底去除 YouTube Music 广告
+# 3. 解锁并强制开启 YouTube / YouTube Music 后台播放（无 Premium 也可锁屏/切后台继续播放）
+# 4. 画中画（PiP）、隐藏底部「上传」按钮、隐藏 Shorts 按钮
+# 5. 字幕/歌词翻译，默认简体中文（zh-CN）
+#
+# （社区目前最稳定、持续更新的方案）
+# - 核心脚本：Maasea《Youtube (Music) Enhance》
+# https://github.com/Maasea/sgmodule
+# （脚本构建于 2026-07-19，同时覆盖 YouTube 与 YouTube Music，
+# 含去广告、后台播放、画中画、翻译；本插件直接引用其官方最新脚本地址）
+# - QUIC 拦截规则写法参考 RuCu6（经 Loon 插件实测验证的写法）
+# - 曾评估备选：app2smile 版仅处理首页/推荐流非贴片广告，功能较旧，未采用
+#
+# ---- 一、安装导入 ----
+# 1. 把本文件托管为可访问的 URL（或直接用 Loon 打开本.plugin 文件）；
+# 2. Loon →「配置」→「插件」→ 右上角「+」→「从 URL 安装」→ 粘贴插件链接 → 安装；
+# 3. 回到插件列表，确认本插件的开关处于开启状态。
+#
+# ---- 二、必须开启的开关（缺一不可）----
+# Loon →「配置」页确认以下全部开启：
+# 1. 「脚本」 ：允许执行 HTTP 请求/响应脚本（去广告与后台播放的核心）；
+# 2. 「复写」 ：允许执行 URL 复写规则；
+# 3. 「MitM」 ：允许中间人解密 HTTPS 流量；
+# 4. 「MitM over HTTP/2」：Loon → 设置 → MitM → 打开「MitM over HTTP/2」
+# （YouTube App 使用 HTTP/2 + protobuf 传输数据，不开此项脚本无法解析响应体，
+# 去广告/后台播放将全部失效）
+#
+# ---- 三、证书安装与信任（只需做一次）----
+# 1. Loon → 设置 → MitM →「生成证书」→「安装证书」，按提示安装描述文件；
+# 2. iPhone → 设置 → 通用 → VPN 与设备管理 → 安装 Loon 的描述文件；
+# 3. iPhone → 设置 → 通用 → 关于本机 → 证书信任设置 → 打开 Loon 证书的「完全信任」开关；
+# 4. 回到 Loon 确认 MitM 已开启，然后彻底杀掉 YouTube / YouTube Music 后台再重新打开。
+#
+# ---- 四、使用注意事项 ----
+# 1. YouTube / YouTube Music 的相关流量必须经过代理（直连无法解密，脚本不生效）；
+# 2. 本插件已在 [Rule] 中拦截发往 googlevideo.com 与 youtubei.googleapis.com 的
+# QUIC（UDP）流量，防止其绕过 MitM 直连导致去广告/后台播放失效，无需其他设置；
+# 3. 不要同时安装其他 YouTube 去广告插件/模块，避免脚本冲突导致功能异常；
+# 4. 字幕翻译默认简体中文（zh-CN）。如需关闭或更换语言，修改 [Script] 中第一条
+# 脚本的 argument 参数：{"captionLang":"off",...} 即关闭；
+# 语言代码遵循 Google Translate 代码（如 en、ja、zh-TW）；
+# 5. 脚本从 GitHub raw 加载，Loon 会自动缓存；作者更新后在插件页重装/刷新即可同步；
+# 6. 首次验证：杀掉 YouTube 后台 → 重新打开 → 下拉刷新首页，确认广告已去除；
+# 锁屏或切换到其他 App 后音频继续播放，即后台播放已生效。
+# =====================================================================
+
+#!name = YouTube & YouTube Music 去广告增强
+#!desc = 去除视频贴片/首页信息流/搜索/Shorts/YT Music广告 · 后台播放 · 画中画 · 隐藏上传/Shorts按钮 · 字幕简体中文翻译
+
+[Rule]
+# ---- QUIC 协议拦截 ----
+# QUIC 基于 UDP 传输。若不拦截，YouTube 会经 QUIC 直连服务器绕过 MitM，
+# 导致去广告与后台播放失效。以下两条直接拒绝相关域名的 UDP 流量，迫使其回退到 TCP/TLS。
+AND,((DOMAIN,youtubei.googleapis.com),(PROTOCOL,UDP)),REJECT
+AND,((DOMAIN-SUFFIX,googlevideo.com),(PROTOCOL,UDP)),REJECT
+# ---- Google 广告投放域名拦截（YouTube 广告链路的补充拦截）----
+DOMAIN-SUFFIX,googleads.g.doubleclick.net,REJECT
+DOMAIN-SUFFIX,pagead2.googlesyndication.com,REJECT
+DOMAIN-SUFFIX,adservice.google.com,REJECT
+DOMAIN-SUFFIX,googleadservices.com,REJECT
+
+[Rewrite]
+# 核心去广告由 [Script] 完成；此处仅拦截 YouTube 网页版广告与追踪上报（App 内极少触发，拒绝无副作用）
+^https?://(www|m)\.youtube\.com/pagead reject
+^https?://(www|m)\.youtube\.com/ptracking reject
+
+[Script]
+# ---- 响应处理（核心）：去除视频贴片/首页信息流/搜索/Shorts 广告、YT Music 广告、
+# 解锁后台播放、启用画中画、隐藏上传按钮与 Shorts 按钮、字幕翻译（默认简体中文）----
+# 参数说明：captionLang=字幕翻译语言(zh-CN简体中文/off关闭)；blockUpload=隐藏上传按钮；
+# blockImmersive=隐藏 YT Music 选段按钮；blockShorts=隐藏 Shorts 按钮；debug=调试日志
+http-response ^https:\/\/youtubei\.googleapis\.com\/(youtubei\/v1\/(browse|next|player|search|reel\/reel_watch_sequence|guide|account\/get_setting|get_watch|log_event|config))(\?(.*))?$ script-path=https://raw.githubusercontent.com/Maasea/sgmodule/master/Script/Youtube/youtube.response.js, requires-body=true, binary-body-mode=true, timeout=60, enable=true, tag=YouTube响应增强, argument="{"captionLang":"zh-CN","blockUpload":true,"blockImmersive":true,"blockShorts":true,"debug":false}"
+
+# ---- 播放初始化请求处理（配合字幕翻译）----
+http-request ^https?:\/\/[\w-]+\.googlevideo\.com\/initplayback.+&ack.* script-path=https://raw.githubusercontent.com/Maasea/sgmodule/master/Script/Youtube/youtube.request.js, requires-body=true, binary-body-mode=true, timeout=30, enable=true, tag=YouTube请求增强, argument="{"captionLang":"zh-CN"}"
+
+# ---- 日志上报请求处理（净化上报数据，降低被反制风险）----
+http-request ^https:\/\/youtubei\.googleapis\.com\/youtubei\/v1\/log_event script-path=https://raw.githubusercontent.com/Maasea/sgmodule/master/Script/Youtube/youtube.request.js, requires-body=true, binary-body-mode=true, timeout=30, enable=true, tag=YouTube上报处理
+
+[MITM]
+hostname = *.googlevideo.com, youtubei.googleapis.com, *.youtube.com, youtube.com
